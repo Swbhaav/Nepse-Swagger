@@ -1,0 +1,30 @@
+{
+  "name": "nepse-scraper-api",
+  "version": "1.0.0",
+  "description": "NEPSE data scraper with Swagger API documentation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "nepse",
+    "scraper",
+    "puppeteer",
+    "swagger",
+    "nepal stock exchange"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "puppeteer": "^21.5.0",
+    "puppeteer-core": "^24.26.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}
