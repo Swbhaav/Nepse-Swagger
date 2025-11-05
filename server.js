@@ -254,6 +254,75 @@ const setupRoutes = (application) => {
       res.status(500).json({ success: false, error: error.message });
     }
   });
+
+  /**
+   * @swagger
+   * /api/floor-sheet:
+   *   get:
+   *     summary: Get floor sheet data
+   *     description: Scrapes floor sheet trading data from NEPSE
+   *     parameters:
+   *       - in: query
+   *         name: limit
+   *         schema:
+   *           type: integer
+   *           default: 50
+   *         description: Number of records to return (default 50)
+   *     responses:
+   *       200:
+   *         description: Successful response
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success:
+   *                   type: boolean
+   *                   example: true
+   *                 data:
+   *                   type: array
+   *                   items:
+   *                     type: object
+   *                     properties:
+   *                       sn:
+   *                         type: string
+   *                         example: "1"
+   *                       contractNo:
+   *                         type: string
+   *                         example: "202411050001"
+   *                       symbol:
+   *                         type: string
+   *                         example: "NABIL"
+   *                       buyerMemberId:
+   *                         type: string
+   *                         example: "12"
+   *                       sellerMemberId:
+   *                         type: string
+   *                         example: "34"
+   *                       quantity:
+   *                         type: string
+   *                         example: "100"
+   *                       rate:
+   *                         type: string
+   *                         example: "1250.00"
+   *                       amount:
+   *                         type: string
+   *                         example: "125000.00"
+   *                       timestamp:
+   *                         type: string
+   *                         example: "2024-01-01T12:00:00.000Z"
+   *       500:
+   *         description: Server error
+   */
+  application.get('/api/floor-sheet', async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      const data = await scrapeFloorSheet(limit);
+      res.json({ success: true, data });
+    } catch (error) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
 };
 
 // Setup routes on both apps
@@ -378,6 +447,48 @@ async function scrapeTopGainers() {
     await browser.close();
   }
 }
+
+async function scrapeFloorSheet(limit = 50) {
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors']
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    
+    await page.goto('https://www.nepalstock.com/floor-sheet', {
+      waitUntil: 'networkidle2',
+      timeout: 70000
+    });
+
+    await page.waitForSelector('table', { timeout: 70000 });
+
+    const floorSheetData = await page.evaluate((limit) => {
+      const rows = Array.from(document.querySelectorAll('table tbody tr'));
+      return rows.slice(0, limit).map(row => {
+        const cells = row.querySelectorAll('td');
+        return {
+          sn: cells[0]?.textContent.trim() || '',
+          contractNo: cells[1]?.textContent.trim() || '',
+          symbol: cells[2]?.textContent.trim() || '',
+          buyerMemberId: cells[3]?.textContent.trim() || '',
+          sellerMemberId: cells[4]?.textContent.trim() || '',
+          quantity: cells[5]?.textContent.trim() || '',
+          rate: cells[6]?.textContent.trim() || '',
+          amount: cells[7]?.textContent.trim() || '',
+          timestamp: new Date().toISOString()
+        };
+      });
+    }, limit);
+
+    return floorSheetData;
+  } finally {
+    await browser.close();
+  }
+}
+
 
 // Start both servers
 app.listen(PORT, () => {
