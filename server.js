@@ -20,6 +20,27 @@ swaggerApp.use(cors());
 app.use(express.json());
 swaggerApp.use(express.json());
 
+// Simple cache with TTL
+const cache = new Map();
+const CACHE_TTL = 60000; // 1 minute
+
+function getCached(key) {
+  const item = cache.get(key);
+  if (!item) return null;
+  if (Date.now() > item.expiry) {
+    cache.delete(key);
+    return null;
+  }
+  return item.data;
+}
+
+function setCache(key, data, ttl = CACHE_TTL) {
+  cache.set(key, {
+    data,
+    expiry: Date.now() + ttl
+  });
+}
+
 // Swagger configuration
 const swaggerOptions = {
   definition: {
@@ -65,14 +86,13 @@ const setupRoutes = (application) => {
    * /api/todays-price:
    *   get:
    *     summary: Get today's price data
-   *     description: Scrapes today's price data from NEPSE website
+   *     description: Scrapes ALL today's price data from NEPSE website
    *     parameters:
    *       - in: query
    *         name: limit
    *         schema:
    *           type: integer
-   *           default: 50
-   *         description: Number of records to return (default 50)
+   *         description: Optional limit on number of records (omit for all data)
    *     responses:
    *       200:
    *         description: Successful response
@@ -88,60 +108,32 @@ const setupRoutes = (application) => {
    *                   type: array
    *                   items:
    *                     type: object
-   *                     properties:
-   *                       sn:
-   *                         type: string
-   *                         example: "1"
-   *                       symbol:
-   *                         type: string
-   *                         example: "NABIL"
-   *                       ltp:
-   *                         type: string
-   *                         example: "1250.00"
-   *                       change:
-   *                         type: string
-   *                         example: "15.00"
-   *                       percentChange:
-   *                         type: string
-   *                         example: "1.21%"
-   *                       open:
-   *                         type: string
-   *                         example: "1235.00"
-   *                       high:
-   *                         type: string
-   *                         example: "1260.00"
-   *                       low:
-   *                         type: string
-   *                         example: "1230.00"
-   *                       volume:
-   *                         type: string
-   *                         example: "15000"
-   *                       previousClose:
-   *                         type: string
-   *                         example: "1235.00"
-   *                       timestamp:
-   *                         type: string
-   *                         example: "2024-01-01T12:00:00.000Z"
+   *                 totalRecords:
+   *                   type: integer
+   *                   example: 250
    *       500:
    *         description: Server error
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: false
-   *                 error:
-   *                   type: string
-   *                   example: "Error message"
    */
   application.get('/api/todays-price', async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit) || 50;
+      const limit = req.query.limit ? parseInt(req.query.limit) : null;
+      const cacheKey = `todays-price-${limit || 'all'}`;
+      
+      const cached = getCached(cacheKey);
+      if (cached) {
+        return res.json({ 
+          success: true, 
+          data: cached, 
+          totalRecords: cached.length,
+          cached: true 
+        });
+      }
+
       const data = await scrapeTodaysPrice(limit);
-      res.json({ success: true, data });
+      setCache(cacheKey, data);
+      res.json({ success: true, data, totalRecords: data.length });
     } catch (error) {
+      console.error('API Error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -151,60 +143,39 @@ const setupRoutes = (application) => {
    * /api/live-trading:
    *   get:
    *     summary: Get live trading data
-   *     description: Scrapes live trading data from NEPSE
+   *     description: Scrapes ALL live trading data from NEPSE
    *     parameters:
    *       - in: query
    *         name: limit
    *         schema:
    *           type: integer
-   *           default: 50
-   *         description: Number of records to return (default 50)
+   *         description: Optional limit on number of records (omit for all data)
    *     responses:
    *       200:
    *         description: Successful response
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: true
-   *                 data:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       symbol:
-   *                         type: string
-   *                         example: "NABIL"
-   *                       ltp:
-   *                         type: string
-   *                         example: "1250.00"
-   *                       change:
-   *                         type: string
-   *                         example: "15.00"
-   *                       percentChange:
-   *                         type: string
-   *                         example: "1.21%"
-   *                       volume:
-   *                         type: string
-   *                         example: "15000"
-   *                       high:
-   *                         type: string
-   *                         example: "1260.00"
-   *                       low:
-   *                         type: string
-   *                         example: "1230.00"
    *       500:
    *         description: Server error
    */
   application.get('/api/live-trading', async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit) || 50;
+      const limit = req.query.limit ? parseInt(req.query.limit) : null;
+      const cacheKey = `live-trading-${limit || 'all'}`;
+      
+      const cached = getCached(cacheKey);
+      if (cached) {
+        return res.json({ 
+          success: true, 
+          data: cached, 
+          totalRecords: cached.length,
+          cached: true 
+        });
+      }
+
       const data = await scrapeLiveTrading(limit);
-      res.json({ success: true, data });
+      setCache(cacheKey, data, 30000); // 30 seconds for live data
+      res.json({ success: true, data, totalRecords: data.length });
     } catch (error) {
+      console.error('API Error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -214,43 +185,32 @@ const setupRoutes = (application) => {
    * /api/top-gainers:
    *   get:
    *     summary: Get top gaining stocks
-   *     description: Scrapes top gaining stocks from NEPSE
+   *     description: Scrapes ALL top gaining stocks from NEPSE
    *     responses:
    *       200:
    *         description: Successful response
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: true
-   *                 data:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       symbol:
-   *                         type: string
-   *                         example: "NABIL"
-   *                       ltp:
-   *                         type: string
-   *                         example: "1250.00"
-   *                       change:
-   *                         type: string
-   *                         example: "15.00"
-   *                       percentChange:
-   *                         type: string
-   *                         example: "1.21%"
    *       500:
    *         description: Server error
    */
   application.get('/api/top-gainers', async (req, res) => {
     try {
+      const cacheKey = 'top-gainers';
+      
+      const cached = getCached(cacheKey);
+      if (cached) {
+        return res.json({ 
+          success: true, 
+          data: cached, 
+          totalRecords: cached.length,
+          cached: true 
+        });
+      }
+
       const data = await scrapeTopGainers();
-      res.json({ success: true, data });
+      setCache(cacheKey, data);
+      res.json({ success: true, data, totalRecords: data.length });
     } catch (error) {
+      console.error('API Error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -260,66 +220,39 @@ const setupRoutes = (application) => {
    * /api/floor-sheet:
    *   get:
    *     summary: Get floor sheet data
-   *     description: Scrapes floor sheet trading data from NEPSE
+   *     description: Scrapes ALL floor sheet trading data from NEPSE
    *     parameters:
    *       - in: query
    *         name: limit
    *         schema:
    *           type: integer
-   *           default: 50
-   *         description: Number of records to return (default 50)
+   *         description: Optional limit on number of records (omit for all data)
    *     responses:
    *       200:
    *         description: Successful response
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: true
-   *                 data:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       sn:
-   *                         type: string
-   *                         example: "1"
-   *                       contractNo:
-   *                         type: string
-   *                         example: "202411050001"
-   *                       symbol:
-   *                         type: string
-   *                         example: "NABIL"
-   *                       buyerMemberId:
-   *                         type: string
-   *                         example: "12"
-   *                       sellerMemberId:
-   *                         type: string
-   *                         example: "34"
-   *                       quantity:
-   *                         type: string
-   *                         example: "100"
-   *                       rate:
-   *                         type: string
-   *                         example: "1250.00"
-   *                       amount:
-   *                         type: string
-   *                         example: "125000.00"
-   *                       timestamp:
-   *                         type: string
-   *                         example: "2024-01-01T12:00:00.000Z"
    *       500:
    *         description: Server error
    */
   application.get('/api/floor-sheet', async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit) || 50;
+      const limit = req.query.limit ? parseInt(req.query.limit) : null;
+      const cacheKey = `floor-sheet-${limit || 'all'}`;
+      
+      const cached = getCached(cacheKey);
+      if (cached) {
+        return res.json({ 
+          success: true, 
+          data: cached, 
+          totalRecords: cached.length,
+          cached: true 
+        });
+      }
+
       const data = await scrapeFloorSheet(limit);
-      res.json({ success: true, data });
+      setCache(cacheKey, data);
+      res.json({ success: true, data, totalRecords: data.length });
     } catch (error) {
+      console.error('API Error:', error);
       res.status(500).json({ success: false, error: error.message });
     }
   });
@@ -329,17 +262,19 @@ const setupRoutes = (application) => {
 setupRoutes(app);
 setupRoutes(swaggerApp);
 
-// Scraper functions
-async function scrapeTodaysPrice(limit = 50) {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox','--ignore-certificate-errors']
-  });
-
+// Scraper functions - Modified to scrape ALL data
+async function scrapeTodaysPrice(limit = null) {
+  let browser;
   try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors']
+    });
+
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     
+    console.log('Loading today\'s price page...');
     await page.goto('https://www.nepalstock.com/today-price', {
       waitUntil: 'networkidle2',
       timeout: 70000
@@ -347,152 +282,419 @@ async function scrapeTodaysPrice(limit = 50) {
 
     await page.waitForSelector('table', { timeout: 70000 });
 
-    const priceData = await page.evaluate((limit) => {
-      const rows = Array.from(document.querySelectorAll('table tbody tr'));
-      return rows.slice(0, limit).map(row => {
-        const cells = row.querySelectorAll('td');
-        return {
-          sn: cells[0]?.textContent.trim() || '',
-          symbol: cells[1]?.textContent.trim() || '',
-          ltp: cells[2]?.textContent.trim() || '',
-          change: cells[3]?.textContent.trim() || '',
-          percentChange: cells[4]?.textContent.trim() || '',
-          open: cells[5]?.textContent.trim() || '',
-          high: cells[6]?.textContent.trim() || '',
-          low: cells[7]?.textContent.trim() || '',
-          volume: cells[8]?.textContent.trim() || '',
-          previousClose: cells[9]?.textContent.trim() || '',
-          timestamp: new Date().toISOString()
-        };
-      });
-    }, limit);
+    let allData = [];
+    let pageCount = 1;
+    const maxPages = 100; // Safety limit to prevent infinite loops
 
-    return priceData;
+    while (pageCount <= maxPages) {
+      console.log(`📊 Scraping today's price page ${pageCount}...`);
+
+      const pageData = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('table tbody tr'));
+        return rows.map(row => {
+          const cells = row.querySelectorAll('td');
+          return {
+            sn: cells[0]?.textContent.trim() || '',
+            symbol: cells[1]?.textContent.trim() || '',
+            ltp: cells[2]?.textContent.trim() || '',
+            change: cells[3]?.textContent.trim() || '',
+            percentChange: cells[4]?.textContent.trim() || '',
+            open: cells[5]?.textContent.trim() || '',
+            high: cells[6]?.textContent.trim() || '',
+            low: cells[7]?.textContent.trim() || '',
+            volume: cells[8]?.textContent.trim() || '',
+            previousClose: cells[9]?.textContent.trim() || '',
+            timestamp: new Date().toISOString()
+          };
+        });
+      });
+
+      if (pageData.length === 0) {
+        console.log('No data found on this page, stopping...');
+        break;
+      }
+
+      allData = allData.concat(pageData);
+      console.log(`   ✓ Collected ${pageData.length} records (Total: ${allData.length})`);
+
+      // If limit is set and reached, stop
+      if (limit && allData.length >= limit) {
+        console.log(`Limit of ${limit} reached`);
+        break;
+      }
+
+      // Check for next button
+      const nextButton = await page.$('a[rel="next"]:not(.disabled), .pagination-next:not(.disabled), .paginate_button.next:not(.disabled)');
+      if (!nextButton) {
+        console.log('No more pages available');
+        break;
+      }
+
+      const isDisabled = await page.evaluate(el => {
+        return el.classList.contains('disabled') || 
+               el.getAttribute('aria-disabled') === 'true' ||
+               el.hasAttribute('disabled');
+      }, nextButton);
+      
+      if (isDisabled) {
+        console.log('Next button is disabled, reached last page');
+        break;
+      }
+
+      // Navigate to next page
+      try {
+        await nextButton.click();
+        await page.waitForTimeout(2000); // Wait for page transition
+        await page.waitForSelector('table tbody tr', { timeout: 10000 });
+      } catch (navError) {
+        console.log(`Navigation issue: ${navError.message}, stopping...`);
+        break;
+      }
+
+      pageCount++;
+    }
+
+    // Apply limit if specified
+    if (limit) {
+      allData = allData.slice(0, limit);
+    }
+
+    console.log(`✅ Total records scraped: ${allData.length}`);
+    return allData;
+
+  } catch (error) {
+    console.error('Error scraping today\'s price:', error);
+    throw error;
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
-async function scrapeLiveTrading(limit = 50) {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-
+async function scrapeLiveTrading(limit = null) {
+  let browser;
   try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     
+    console.log('Loading live trading page...');
     await page.goto('https://www.nepalstock.com/live-trading', {
-      waitUntil: 'networkidle2',
-      timeout: 60000
-    });
-
-    await page.waitForSelector('table', { timeout: 60000 });
-
-    const tradingData = await page.evaluate((limit) => {
-      const rows = Array.from(document.querySelectorAll('table tbody tr'));
-      return rows.slice(0, limit).map(row => {
-        const cells = row.querySelectorAll('td');
-        return {
-          symbol: cells[0]?.textContent.trim() || '',
-          ltp: cells[1]?.textContent.trim() || '',
-          change: cells[2]?.textContent.trim() || '',
-          percentChange: cells[3]?.textContent.trim() || '',
-          volume: cells[4]?.textContent.trim() || '',
-          high: cells[5]?.textContent.trim() || '',
-          low: cells[6]?.textContent.trim() || ''
-        };
-      });
-    }, limit);
-
-    return tradingData;
-  } finally {
-    await browser.close();
-  }
-}
-
-async function scrapeTopGainers() {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    
-    await page.goto('https://www.nepalstock.com/top-ten/top-gainers', {
-      waitUntil: 'networkidle2',
-      timeout: 60000
-    });
-
-    await page.waitForSelector('table', { timeout: 60000 });
-
-    const gainersData = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('table tbody tr'));
-      return rows.map(row => {
-        const cells = row.querySelectorAll('td');
-        return {
-          symbol: cells[0]?.textContent.trim() || '',
-          ltp: cells[1]?.textContent.trim() || '',
-          change: cells[2]?.textContent.trim() || '',
-          percentChange: cells[3]?.textContent.trim() || ''
-        };
-      });
-    });
-
-    return gainersData;
-  } finally {
-    await browser.close();
-  }
-}
-
-async function scrapeFloorSheet(limit = 50) {
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors']
-  });
-
-  try {
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-    
-    await page.goto('https://www.nepalstock.com/floor-sheet', {
       waitUntil: 'networkidle2',
       timeout: 70000
     });
 
     await page.waitForSelector('table', { timeout: 70000 });
 
-    const floorSheetData = await page.evaluate((limit) => {
-      const rows = Array.from(document.querySelectorAll('table tbody tr'));
-      return rows.slice(0, limit).map(row => {
-        const cells = row.querySelectorAll('td');
-        return {
-          sn: cells[0]?.textContent.trim() || '',
-          contractNo: cells[1]?.textContent.trim() || '',
-          symbol: cells[2]?.textContent.trim() || '',
-          buyerMemberId: cells[3]?.textContent.trim() || '',
-          sellerMemberId: cells[4]?.textContent.trim() || '',
-          quantity: cells[5]?.textContent.trim() || '',
-          rate: cells[6]?.textContent.trim() || '',
-          amount: cells[7]?.textContent.trim() || '',
-          timestamp: new Date().toISOString()
-        };
-      });
-    }, limit);
+    let allData = [];
+    let pageCount = 1;
+    const maxPages = 100;
 
-    return floorSheetData;
+    while(pageCount <= maxPages){
+      console.log(`📊 Scraping live trading page ${pageCount}...`);
+
+      const scrapedData = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('table tbody tr'));
+        return rows.map(row => {
+          const cells = row.querySelectorAll('td');
+          return {
+            symbol: cells[0]?.textContent.trim() || '',
+            ltp: cells[1]?.textContent.trim() || '',
+            change: cells[2]?.textContent.trim() || '',
+            percentChange: cells[3]?.textContent.trim() || '',
+            volume: cells[4]?.textContent.trim() || '',
+            high: cells[5]?.textContent.trim() || '',
+            low: cells[6]?.textContent.trim() || '',
+            timestamp: new Date().toISOString()
+          };
+        });
+      });
+
+      if (scrapedData.length === 0) {
+        console.log('No data found on this page, stopping...');
+        break;
+      }
+
+      allData = allData.concat(scrapedData);
+      console.log(`   ✓ Collected ${scrapedData.length} records (Total: ${allData.length})`);
+
+      if (limit && allData.length >= limit) {
+        console.log(`Limit of ${limit} reached`);
+        break;
+      }
+
+      const nextButton = await page.$('a[rel="next"]:not(.disabled), .pagination-next:not(.disabled), .paginate_button.next:not(.disabled)');
+      if(!nextButton) {
+        console.log('No more pages available');
+        break;
+      }
+
+      const isDisabled = await page.evaluate(el => {
+        return el.classList.contains('disabled') || 
+               el.getAttribute('aria-disabled') === 'true' ||
+               el.hasAttribute('disabled');
+      }, nextButton);
+      
+      if(isDisabled) {
+        console.log('Next button is disabled, reached last page');
+        break;
+      }
+
+      try {
+        await nextButton.click();
+        await page.waitForTimeout(2000);
+        await page.waitForSelector('table tbody tr', { timeout: 10000 });
+      } catch (navError) {
+        console.log(`Navigation issue: ${navError.message}, stopping...`);
+        break;
+      }
+
+      pageCount++;
+    }
+    
+    if (limit) {
+      allData = allData.slice(0, limit);
+    }
+
+    console.log(`✅ Total records scraped: ${allData.length}`);
+    return allData;
+
+  } catch (error) {
+    console.error('Error scraping live trading:', error);
+    throw error;
   } finally {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
+async function scrapeTopGainers() {
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    
+    console.log('Loading top gainers page...');
+    await page.goto('https://www.nepalstock.com/top-ten/top-gainers', {
+      waitUntil: 'networkidle2',
+      timeout: 70000
+    });
+
+    await page.waitForSelector('table', { timeout: 70000 });
+
+    let allData = [];
+    let pageCount = 1;
+    const maxPages = 50;
+
+    while(pageCount <= maxPages){
+      console.log(`📊 Scraping top gainers page ${pageCount}...`);
+
+      const gainersData = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('table tbody tr'));
+        return rows.map(row => {
+          const cells = row.querySelectorAll('td');
+          return {
+            symbol: cells[0]?.textContent.trim() || '',
+            ltp: cells[1]?.textContent.trim() || '',
+            change: cells[2]?.textContent.trim() || '',
+            percentChange: cells[3]?.textContent.trim() || '',
+            timestamp: new Date().toISOString()
+          };
+        });
+      });
+
+      if (gainersData.length === 0) {
+        console.log('No data found on this page, stopping...');
+        break;
+      }
+
+      allData = allData.concat(gainersData);
+      console.log(`   ✓ Collected ${gainersData.length} records (Total: ${allData.length})`);
+
+      const nextButton = await page.$('a[rel="next"]:not(.disabled), .pagination-next:not(.disabled), .paginate_button.next:not(.disabled)');
+      if(!nextButton) {
+        console.log('No more pages available');
+        break;
+      }
+
+      const isDisabled = await page.evaluate(el => {
+        return el.classList.contains('disabled') || 
+               el.getAttribute('aria-disabled') === 'true' ||
+               el.hasAttribute('disabled');
+      }, nextButton);
+      
+      if(isDisabled) {
+        console.log('Next button is disabled, reached last page');
+        break;
+      }
+
+      try {
+        await nextButton.click();
+        await page.waitForTimeout(2000);
+        await page.waitForSelector('table tbody tr', { timeout: 10000 });
+      } catch (navError) {
+        console.log(`Navigation issue: ${navError.message}, stopping...`);
+        break;
+      }
+
+      pageCount++;
+    }
+    
+    console.log(`✅ Total records scraped: ${allData.length}`);
+    return allData;
+    
+  } catch (error){
+    console.error('Error scraping top gainers:', error);
+    throw error;
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+}
+
+async function scrapeFloorSheet(limit = null) {
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors']
+    });
+
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+    
+    console.log('Loading floor sheet page...');
+    await page.goto('https://www.nepalstock.com/floor-sheet', {
+      waitUntil: 'domcontentloaded',
+      timeout: 70000
+    });
+
+    // Wait a bit longer for dynamic content
+    await page.waitForTimeout(3000);
+    await page.waitForSelector('table', { timeout: 70000 });
+
+    let allData = [];
+    let pageCount = 1;
+    let globalSerialNumber =1;
+    const maxPages = 100;
+
+    while(pageCount <= maxPages){
+      console.log(`📊 Scraping floor sheet page ${pageCount}...`);
+
+      const floorSheetData = await page.evaluate(() => {
+        const rows = Array.from(document.querySelectorAll('table tbody tr'));
+        return rows.map(row => {
+          const cells = row.querySelectorAll('td');
+          return {
+            pageSn: cells[0]?.textContent.trim() || '',
+            contractNo: cells[1]?.textContent.trim() || '',
+            symbol: cells[2]?.textContent.trim() || '',
+            buyerMemberId: cells[3]?.textContent.trim() || '',
+            sellerMemberId: cells[4]?.textContent.trim() || '',
+            quantity: cells[5]?.textContent.trim() || '',
+            rate: cells[6]?.textContent.trim() || '',
+            amount: cells[7]?.textContent.trim() || '',
+            timestamp: new Date().toISOString()
+          };
+        });
+      });
+      
+      if (floorSheetData.length === 0) {
+        console.log('No data found on this page, stopping...');
+        break;
+      }
+
+      const dataWithGlobalSn = floorSheetData.map(item => ({sn: globalSerialNumber++, ...item}));
+
+      allData = allData.concat(floorSheetData);
+      console.log(`   ✓ Collected ${floorSheetData.length} records (Total: ${allData.length})`);
+
+      if (limit && allData.length >= limit) {
+        console.log(`Limit of ${limit} reached`);
+        break;
+      }
+
+      // Check for next button using JavaScript click (more reliable for AJAX pagination)
+      const hasNext = await page.evaluate(() => {
+        const nextBtn = document.querySelector('a[rel="next"], .pagination-next, .paginate_button.next, li.next a');
+        if (!nextBtn) return false;
+        
+        const parentLi = nextBtn.closest('li');
+        if (parentLi && parentLi.classList.contains('disabled')) return false;
+        
+        if (nextBtn.classList.contains('disabled') || 
+            nextBtn.getAttribute('aria-disabled') === 'true' ||
+            nextBtn.hasAttribute('disabled')) {
+          return false;
+        }
+        
+        return true;
+      });
+
+      if (!hasNext) {
+        console.log('No more pages available or next button disabled');
+        break;
+      }
+
+      // Click using JavaScript for AJAX-based pagination
+      await page.evaluate(() => {
+        const nextBtn = document.querySelector('a[rel="next"], .pagination-next, .paginate_button.next, li.next a');
+        if (nextBtn) nextBtn.click();
+      });
+
+      // Wait for content to update
+      await page.waitForTimeout(3000);
+      
+      // Verify that new content loaded
+      const newRowCount = await page.evaluate(() => {
+        return document.querySelectorAll('table tbody tr').length;
+      });
+
+      if (newRowCount === 0) {
+        console.log('No rows found after navigation, stopping...');
+        break;
+      }
+
+      pageCount++;
+    }
+    
+    if (limit) {
+      allData = allData.slice(0, limit);
+    }
+
+    console.log(`✅ Total records scraped: ${allData.length}`);
+    return allData;
+
+  } catch (error) {
+    console.error('Error scraping floor sheet:', error);
+    throw error;
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+}
 
 // Start both servers
 app.listen(PORT, () => {
-  console.log(`API Server running on http://localhost:${PORT}`);
+  console.log(`\n🚀 API Server running on http://localhost:${PORT}`);
+  console.log(`\n📡 Available endpoints:`);
+  console.log(`   GET http://localhost:${PORT}/api/todays-price`);
+  console.log(`   GET http://localhost:${PORT}/api/live-trading`);
+  console.log(`   GET http://localhost:${PORT}/api/top-gainers`);
+  console.log(`   GET http://localhost:${PORT}/api/floor-sheet`);
 });
 
 swaggerApp.listen(SWAGGER_PORT, () => {
