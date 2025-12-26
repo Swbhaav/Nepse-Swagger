@@ -9,14 +9,13 @@ const cors = require('cors');
 
 const app = express();
 
+const PORT = process.env.PORT || 3000;
 
-// Enable CORS for both apps
+// Enable CORS
 app.use(cors());
-
 
 // Parse JSON bodies
 app.use(express.json());
-
 
 // Simple cache with TTL
 const cache = new Map();
@@ -54,11 +53,7 @@ const swaggerOptions = {
     servers: [
       {
         url: '/',
-        description: 'Current server (use this for ngrok)'
-      },
-      {
-        url: `http://localhost:${PORT}`,
-        description: 'Local API server'
+        description: 'Current server'
       }
     ]
   },
@@ -67,204 +62,223 @@ const swaggerOptions = {
 
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
 
-// Serve Swagger at ROOT with enhanced options
-const swaggerOptions2 = {
+// Mount Swagger UI
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs, {
   swaggerOptions: {
     persistAuthorization: true,
   }
-};
+}));
 
-
-// Define API routes function
-const setupRoutes = (application) => {
-  /**
-   * @swagger
-   * /api/todays-price:
-   *   get:
-   *     summary: Get today's price data
-   *     description: Scrapes ALL today's price data from NEPSE website
-   *     parameters:
-   *       - in: query
-   *         name: limit
-   *         schema:
-   *           type: integer
-   *         description: Optional limit on number of records (omit for all data)
-   *     responses:
-   *       200:
-   *         description: Successful response
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 success:
-   *                   type: boolean
-   *                   example: true
-   *                 data:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                 totalRecords:
-   *                   type: integer
-   *                   example: 250
-   *       500:
-   *         description: Server error
-   */
-  application.get('/api/todays-price', async (req, res) => {
-    try {
-      const limit = req.query.limit ? parseInt(req.query.limit) : null;
-      const cacheKey = `todays-price-${limit || 'all'}`;
-      
-      const cached = getCached(cacheKey);
-      if (cached) {
-        return res.json({ 
-          success: true, 
-          data: cached, 
-          totalRecords: cached.length,
-          cached: true 
-        });
-      }
-
-      const data = await scrapeTodaysPrice(limit);
-      setCache(cacheKey, data);
-      res.json({ success: true, data, totalRecords: data.length });
-    } catch (error) {
-      console.error('API Error:', error);
-      res.status(500).json({ success: false, error: error.message });
+/**
+ * @swagger
+ * /api/todays-price:
+ *   get:
+ *     summary: Get today's price data
+ *     description: Scrapes ALL today's price data from NEPSE website
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Optional limit on number of records (omit for all data)
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                 totalRecords:
+ *                   type: integer
+ *       500:
+ *         description: Server error
+ */
+app.get('/api/todays-price', async (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : null;
+    const cacheKey = `todays-price-${limit || 'all'}`;
+    
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json({ 
+        success: true, 
+        data: cached, 
+        totalRecords: cached.length,
+        cached: true 
+      });
     }
-  });
 
-  /**
-   * @swagger
-   * /api/live-trading:
-   *   get:
-   *     summary: Get live trading data
-   *     description: Scrapes ALL live trading data from NEPSE
-   *     parameters:
-   *       - in: query
-   *         name: limit
-   *         schema:
-   *           type: integer
-   *         description: Optional limit on number of records (omit for all data)
-   *     responses:
-   *       200:
-   *         description: Successful response
-   *       500:
-   *         description: Server error
-   */
-  application.get('/api/live-trading', async (req, res) => {
-    try {
-      const limit = req.query.limit ? parseInt(req.query.limit) : null;
-      const cacheKey = `live-trading-${limit || 'all'}`;
-      
-      const cached = getCached(cacheKey);
-      if (cached) {
-        return res.json({ 
-          success: true, 
-          data: cached, 
-          totalRecords: cached.length,
-          cached: true 
-        });
-      }
+    const data = await scrapeTodaysPrice(limit);
+    setCache(cacheKey, data);
+    res.json({ success: true, data, totalRecords: data.length });
+  } catch (error) {
+    console.error('API Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-      const data = await scrapeLiveTrading(limit);
-      setCache(cacheKey, data, 30000); // 30 seconds for live data
-      res.json({ success: true, data, totalRecords: data.length });
-    } catch (error) {
-      console.error('API Error:', error);
-      res.status(500).json({ success: false, error: error.message });
+/**
+ * @swagger
+ * /api/live-trading:
+ *   get:
+ *     summary: Get live trading data
+ *     description: Scrapes ALL live trading data from NEPSE
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Optional limit on number of records
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       500:
+ *         description: Server error
+ */
+app.get('/api/live-trading', async (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : null;
+    const cacheKey = `live-trading-${limit || 'all'}`;
+    
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json({ 
+        success: true, 
+        data: cached, 
+        totalRecords: cached.length,
+        cached: true 
+      });
     }
-  });
 
-  /**
-   * @swagger
-   * /api/top-gainers:
-   *   get:
-   *     summary: Get top gaining stocks
-   *     description: Scrapes ALL top gaining stocks from NEPSE
-   *     responses:
-   *       200:
-   *         description: Successful response
-   *       500:
-   *         description: Server error
-   */
-  application.get('/api/top-gainers', async (req, res) => {
-    try {
-      const cacheKey = 'top-gainers';
-      
-      const cached = getCached(cacheKey);
-      if (cached) {
-        return res.json({ 
-          success: true, 
-          data: cached, 
-          totalRecords: cached.length,
-          cached: true 
-        });
-      }
+    const data = await scrapeLiveTrading(limit);
+    setCache(cacheKey, data, 30000);
+    res.json({ success: true, data, totalRecords: data.length });
+  } catch (error) {
+    console.error('API Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-      const data = await scrapeTopGainers();
-      setCache(cacheKey, data);
-      res.json({ success: true, data, totalRecords: data.length });
-    } catch (error) {
-      console.error('API Error:', error);
-      res.status(500).json({ success: false, error: error.message });
+/**
+ * @swagger
+ * /api/top-gainers:
+ *   get:
+ *     summary: Get top gaining stocks
+ *     description: Scrapes ALL top gaining stocks from NEPSE
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       500:
+ *         description: Server error
+ */
+app.get('/api/top-gainers', async (req, res) => {
+  try {
+    const cacheKey = 'top-gainers';
+    
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json({ 
+        success: true, 
+        data: cached, 
+        totalRecords: cached.length,
+        cached: true 
+      });
     }
-  });
 
-  /**
-   * @swagger
-   * /api/floor-sheet:
-   *   get:
-   *     summary: Get floor sheet data
-   *     description: Scrapes ALL floor sheet trading data from NEPSE
-   *     parameters:
-   *       - in: query
-   *         name: limit
-   *         schema:
-   *           type: integer
-   *         description: Optional limit on number of records (omit for all data)
-   *     responses:
-   *       200:
-   *         description: Successful response
-   *       500:
-   *         description: Server error
-   */
-  application.get('/api/floor-sheet', async (req, res) => {
-    try {
-      const limit = req.query.limit ? parseInt(req.query.limit) : null;
-      const cacheKey = `floor-sheet-${limit || 'all'}`;
-      
-      const cached = getCached(cacheKey);
-      if (cached) {
-        return res.json({ 
-          success: true, 
-          data: cached, 
-          totalRecords: cached.length,
-          cached: true 
-        });
-      }
+    const data = await scrapeTopGainers();
+    setCache(cacheKey, data);
+    res.json({ success: true, data, totalRecords: data.length });
+  } catch (error) {
+    console.error('API Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-      const data = await scrapeFloorSheet(limit);
-      setCache(cacheKey, data);
-      res.json({ success: true, data, totalRecords: data.length });
-    } catch (error) {
-      console.error('API Error:', error);
-      res.status(500).json({ success: false, error: error.message });
+/**
+ * @swagger
+ * /api/floor-sheet:
+ *   get:
+ *     summary: Get floor sheet data
+ *     description: Scrapes ALL floor sheet trading data from NEPSE
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Optional limit on number of records
+ *     responses:
+ *       200:
+ *         description: Successful response
+ *       500:
+ *         description: Server error
+ */
+app.get('/api/floor-sheet', async (req, res) => {
+  try {
+    const limit = req.query.limit ? parseInt(req.query.limit) : null;
+    const cacheKey = `floor-sheet-${limit || 'all'}`;
+    
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return res.json({ 
+        success: true, 
+        data: cached, 
+        totalRecords: cached.length,
+        cached: true 
+      });
     }
+
+    const data = await scrapeFloorSheet(limit);
+    setCache(cacheKey, data);
+    res.json({ success: true, data, totalRecords: data.length });
+  } catch (error) {
+    console.error('API Error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'NEPSE Scraper API',
+    version: '1.0.0',
+    endpoints: [
+      { path: '/api/todays-price', method: 'GET' },
+      { path: '/api/live-trading', method: 'GET' },
+      { path: '/api/top-gainers', method: 'GET' },
+      { path: '/api/floor-sheet', method: 'GET' },
+      { path: '/api-docs', method: 'GET', description: 'Swagger Documentation' },
+      { path: '/health', method: 'GET', description: 'Health check' }
+    ]
   });
-};
+});
 
-// Setup routes on both apps
-setupRoutes(app);
-
-
-// Scraper functions - Modified to scrape ALL data
+// Scraper functions
 async function scrapeTodaysPrice(limit = null) {
   let browser;
   try {
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process'
+      ]
     });
 
     const page = await browser.newPage();
@@ -280,7 +294,7 @@ async function scrapeTodaysPrice(limit = null) {
 
     let allData = [];
     let pageCount = 1;
-    const maxPages = 100; // Safety limit to prevent infinite loops
+    const maxPages = 100;
 
     while (pageCount <= maxPages) {
       console.log(`📊 Scraping today's price page ${pageCount}...`);
@@ -305,56 +319,36 @@ async function scrapeTodaysPrice(limit = null) {
         });
       });
 
-      if (pageData.length === 0) {
-        console.log('No data found on this page, stopping...');
-        break;
-      }
+      if (pageData.length === 0) break;
 
       allData = allData.concat(pageData);
       console.log(`   ✓ Collected ${pageData.length} records (Total: ${allData.length})`);
 
-      // If limit is set and reached, stop
-      if (limit && allData.length >= limit) {
-        console.log(`Limit of ${limit} reached`);
-        break;
-      }
+      if (limit && allData.length >= limit) break;
 
-      // Check for next button
-      const nextButton = await page.$('a[rel="next"]:not(.disabled), .pagination-next:not(.disabled), .paginate_button.next:not(.disabled)');
-      if (!nextButton) {
-        console.log('No more pages available');
-        break;
-      }
+      const nextButton = await page.$('a[rel="next"]:not(.disabled)');
+      if (!nextButton) break;
 
       const isDisabled = await page.evaluate(el => {
         return el.classList.contains('disabled') || 
-               el.getAttribute('aria-disabled') === 'true' ||
-               el.hasAttribute('disabled');
+               el.getAttribute('aria-disabled') === 'true';
       }, nextButton);
       
-      if (isDisabled) {
-        console.log('Next button is disabled, reached last page');
-        break;
-      }
+      if (isDisabled) break;
 
-      // Navigate to next page
       try {
         await nextButton.click();
-        await page.waitForTimeout(2000); // Wait for page transition
+        await page.waitForTimeout(2000);
         await page.waitForSelector('table tbody tr', { timeout: 10000 });
       } catch (navError) {
-        console.log(`Navigation issue: ${navError.message}, stopping...`);
+        console.log(`Navigation issue: ${navError.message}`);
         break;
       }
 
       pageCount++;
     }
 
-    // Apply limit if specified
-    if (limit) {
-      allData = allData.slice(0, limit);
-    }
-
+    if (limit) allData = allData.slice(0, limit);
     console.log(`✅ Total records scraped: ${allData.length}`);
     return allData;
 
@@ -362,9 +356,7 @@ async function scrapeTodaysPrice(limit = null) {
     console.error('Error scraping today\'s price:', error);
     throw error;
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 }
 
@@ -373,7 +365,12 @@ async function scrapeLiveTrading(limit = null) {
   try {
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
     });
 
     const page = await browser.newPage();
@@ -392,8 +389,6 @@ async function scrapeLiveTrading(limit = null) {
     const maxPages = 100;
 
     while(pageCount <= maxPages){
-      console.log(`📊 Scraping live trading page ${pageCount}...`);
-
       const scrapedData = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('table tbody tr'));
         return rows.map(row => {
@@ -411,62 +406,38 @@ async function scrapeLiveTrading(limit = null) {
         });
       });
 
-      if (scrapedData.length === 0) {
-        console.log('No data found on this page, stopping...');
-        break;
-      }
-
+      if (scrapedData.length === 0) break;
       allData = allData.concat(scrapedData);
-      console.log(`   ✓ Collected ${scrapedData.length} records (Total: ${allData.length})`);
+      if (limit && allData.length >= limit) break;
 
-      if (limit && allData.length >= limit) {
-        console.log(`Limit of ${limit} reached`);
-        break;
-      }
-
-      const nextButton = await page.$('a[rel="next"]:not(.disabled), .pagination-next:not(.disabled), .paginate_button.next:not(.disabled)');
-      if(!nextButton) {
-        console.log('No more pages available');
-        break;
-      }
+      const nextButton = await page.$('a[rel="next"]:not(.disabled)');
+      if(!nextButton) break;
 
       const isDisabled = await page.evaluate(el => {
-        return el.classList.contains('disabled') || 
-               el.getAttribute('aria-disabled') === 'true' ||
-               el.hasAttribute('disabled');
+        return el.classList.contains('disabled');
       }, nextButton);
       
-      if(isDisabled) {
-        console.log('Next button is disabled, reached last page');
-        break;
-      }
+      if(isDisabled) break;
 
       try {
         await nextButton.click();
         await page.waitForTimeout(2000);
         await page.waitForSelector('table tbody tr', { timeout: 10000 });
       } catch (navError) {
-        console.log(`Navigation issue: ${navError.message}, stopping...`);
         break;
       }
 
       pageCount++;
     }
     
-    if (limit) {
-      allData = allData.slice(0, limit);
-    }
-
-    console.log(`✅ Total records scraped: ${allData.length}`);
+    if (limit) allData = allData.slice(0, limit);
     return allData;
 
   } catch (error) {
     console.error('Error scraping live trading:', error);
     throw error;
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 }
 
@@ -475,13 +446,12 @@ async function scrapeTopGainers() {
   try {
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
 
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     
-    console.log('Loading top gainers page...');
     await page.goto('https://www.nepalstock.com/top-ten/top-gainers', {
       waitUntil: 'networkidle2',
       timeout: 70000
@@ -494,8 +464,6 @@ async function scrapeTopGainers() {
     const maxPages = 50;
 
     while(pageCount <= maxPages){
-      console.log(`📊 Scraping top gainers page ${pageCount}...`);
-
       const gainersData = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('table tbody tr'));
         return rows.map(row => {
@@ -510,53 +478,36 @@ async function scrapeTopGainers() {
         });
       });
 
-      if (gainersData.length === 0) {
-        console.log('No data found on this page, stopping...');
-        break;
-      }
-
+      if (gainersData.length === 0) break;
       allData = allData.concat(gainersData);
-      console.log(`   ✓ Collected ${gainersData.length} records (Total: ${allData.length})`);
 
-      const nextButton = await page.$('a[rel="next"]:not(.disabled), .pagination-next:not(.disabled), .paginate_button.next:not(.disabled)');
-      if(!nextButton) {
-        console.log('No more pages available');
-        break;
-      }
+      const nextButton = await page.$('a[rel="next"]:not(.disabled)');
+      if(!nextButton) break;
 
       const isDisabled = await page.evaluate(el => {
-        return el.classList.contains('disabled') || 
-               el.getAttribute('aria-disabled') === 'true' ||
-               el.hasAttribute('disabled');
+        return el.classList.contains('disabled');
       }, nextButton);
       
-      if(isDisabled) {
-        console.log('Next button is disabled, reached last page');
-        break;
-      }
+      if(isDisabled) break;
 
       try {
         await nextButton.click();
         await page.waitForTimeout(2000);
         await page.waitForSelector('table tbody tr', { timeout: 10000 });
       } catch (navError) {
-        console.log(`Navigation issue: ${navError.message}, stopping...`);
         break;
       }
 
       pageCount++;
     }
     
-    console.log(`✅ Total records scraped: ${allData.length}`);
     return allData;
     
   } catch (error){
     console.error('Error scraping top gainers:', error);
     throw error;
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 }
 
@@ -565,30 +516,25 @@ async function scrapeFloorSheet(limit = null) {
   try {
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--ignore-certificate-errors']
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
 
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
     
-    console.log('Loading floor sheet page...');
     await page.goto('https://www.nepalstock.com/floor-sheet', {
       waitUntil: 'domcontentloaded',
       timeout: 70000
     });
 
-    // Wait a bit longer for dynamic content
     await page.waitForTimeout(3000);
     await page.waitForSelector('table', { timeout: 70000 });
 
     let allData = [];
     let pageCount = 1;
-    let globalSerialNumber =1;
     const maxPages = 100;
 
     while(pageCount <= maxPages){
-      console.log(`📊 Scraping floor sheet page ${pageCount}...`);
-
       const floorSheetData = await page.evaluate(() => {
         const rows = Array.from(document.querySelectorAll('table tbody tr'));
         return rows.map(row => {
@@ -607,92 +553,54 @@ async function scrapeFloorSheet(limit = null) {
         });
       });
       
-      if (floorSheetData.length === 0) {
-        console.log('No data found on this page, stopping...');
-        break;
-      }
-
-      const dataWithGlobalSn = floorSheetData.map(item => ({sn: globalSerialNumber++, ...item}));
-
+      if (floorSheetData.length === 0) break;
       allData = allData.concat(floorSheetData);
-      console.log(`   ✓ Collected ${floorSheetData.length} records (Total: ${allData.length})`);
+      if (limit && allData.length >= limit) break;
 
-      if (limit && allData.length >= limit) {
-        console.log(`Limit of ${limit} reached`);
-        break;
-      }
-
-      // Check for next button using JavaScript click (more reliable for AJAX pagination)
       const hasNext = await page.evaluate(() => {
-        const nextBtn = document.querySelector('a[rel="next"], .pagination-next, .paginate_button.next, li.next a');
+        const nextBtn = document.querySelector('a[rel="next"]');
         if (!nextBtn) return false;
         
         const parentLi = nextBtn.closest('li');
         if (parentLi && parentLi.classList.contains('disabled')) return false;
         
-        if (nextBtn.classList.contains('disabled') || 
-            nextBtn.getAttribute('aria-disabled') === 'true' ||
-            nextBtn.hasAttribute('disabled')) {
-          return false;
-        }
-        
-        return true;
+        return !nextBtn.classList.contains('disabled');
       });
 
-      if (!hasNext) {
-        console.log('No more pages available or next button disabled');
-        break;
-      }
+      if (!hasNext) break;
 
-      // Click using JavaScript for AJAX-based pagination
       await page.evaluate(() => {
-        const nextBtn = document.querySelector('a[rel="next"], .pagination-next, .paginate_button.next, li.next a');
+        const nextBtn = document.querySelector('a[rel="next"]');
         if (nextBtn) nextBtn.click();
       });
 
-      // Wait for content to update
       await page.waitForTimeout(3000);
       
-      // Verify that new content loaded
       const newRowCount = await page.evaluate(() => {
         return document.querySelectorAll('table tbody tr').length;
       });
 
-      if (newRowCount === 0) {
-        console.log('No rows found after navigation, stopping...');
-        break;
-      }
+      if (newRowCount === 0) break;
 
       pageCount++;
     }
     
-    if (limit) {
-      allData = allData.slice(0, limit);
-    }
-
-    console.log(`✅ Total records scraped: ${allData.length}`);
+    if (limit) allData = allData.slice(0, limit);
     return allData;
 
   } catch (error) {
     console.error('Error scraping floor sheet:', error);
     throw error;
   } finally {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
   }
 }
 
-app.get('/',(req,res) => {
-  res.status(200).json({
-    message: 'NEPSE Scraper API running on vercel',
-    endpoints: [
-      '/api/todays-price',
-      '/api/live-trading',
-      '/api/top-gainers',
-      '/api/floor-sheet'
-    ]
-  });
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 NEPSE Scraper API running on port ${PORT}`);
+  console.log(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
+  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
 });
 
 module.exports = app;
